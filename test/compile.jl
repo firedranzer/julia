@@ -568,14 +568,14 @@ let
             pushfirst!(Base.LOAD_CACHE_PATH, $load_cache_path)
         end
         try
-            @eval using $ModuleB
-            uuid = Base.module_uuid(root_module(ModuleB))
-            for wid in test_workers
-                @test Distributed.remotecall_eval(Main, wid, :( Base.module_uuid(Base.root_module($(QuoteNode(ModuleB)))) )) == uuid
-                if wid != myid() # avoid world-age errors on the local proc
-                    @test remotecall_fetch(g, wid) == wid
-                end
-            end
+            # @eval using $ModuleB
+            # uuid = Base.module_uuid(root_module(ModuleB))
+            # for wid in test_workers
+            #     @test Distributed.remotecall_eval(Main, wid, :( Base.module_uuid(Base.root_module($(QuoteNode(ModuleB)))) )) == uuid
+            #     if wid != myid() # avoid world-age errors on the local proc
+            #         @test remotecall_fetch(g, wid) == wid
+            #     end
+            # end
         finally
             @everywhere test_workers begin
                 popfirst!(LOAD_PATH)
