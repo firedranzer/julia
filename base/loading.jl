@@ -80,22 +80,80 @@ else
     end
 end
 
-macro return_if_file(path)
-    quote
-        path = $(esc(path))
-        isfile_casesensitive(path) && return path
-    end
-end
+const ENVINFO = Symbol("#ENVINFO")
+
+const project_names = ["JuliaProject.toml", "Project.toml"]
+const manifest_names = ["JuliaManifest.toml", "Manifest.toml"]
+
+implicit_env_files(path::String, name::String) = [
+    joinpath(path, "$name.jl"),
+    joinpath(path, "$name.jl", "src", "$name.jl"),
+    joinpath(path,   name,     "src", "$name.jl"),
+]
 
 function find_package(from::Module, name::String)
-    @info "@$(getpid()): find_package($from, $name)"
     endswith(name, ".jl") && (name = chop(name, 0, 3))
+    project_file = from_path = from_project = from_uuid = nothing
+    if isdefined(from, ENVINFO)
+        from_path, from_project, from_uuid = getfield(from, ENVINFO)
+    end
     for env in LOAD_PATH
-        env isa String || continue
-        dir = abspath(env)
-        @return_if_file joinpath(dir, "$name.jl")
-        @return_if_file joinpath(dir, "$name.jl", "src", "$name.jl")
-        @return_if_file joinpath(dir,   name,     "src", "$name.jl")
+        if env isa String
+            path = abspath(env)
+            ispath(path) || continue
+            if endswith(path, ".toml") && isfile_casesensitive(path)
+                project_file = path
+            elseif isdir(path)
+                for name in project_names
+                    file = abspath(path, name)
+                    isfile_casesensitive(file) || continue
+                    project_file = file
+                    break
+                end
+                if project_file == nothing
+                    for file in implicit_env_files(path, name)
+                        isfile_casesensitive(file) || continue
+                        return file, file, nothing
+                    end
+                end
+            end
+        elseif env isa NamedEnv
+            for (i, depot) in enumerate(DEPOT_PATH)
+                isdir(depot) || continue
+                for name in project_names
+                    file = abspath(depot, "environments", env.name, name)
+                    exists = isfile_casesensitive(file)
+                    if i == 1 && !exists && env.create
+                        try mkpath(dirname(file))
+                            touch(file)
+                        catch err
+                            @warn "Could not create $(repr(file)):\n$err"
+                        end
+                        exists = isfile_casesensitive(file)
+                    end
+                    exists || continue
+                    project_file = file
+                    break
+                end
+            end
+        elseif env isa CurrentEnv
+            dir = pwd()
+            while true
+                for name in project_names
+                    file = joinpath(dir, name)
+                    isfile_casesensitive(file) || continue
+                    project_file = file
+                    break
+                end
+                project_file == nothing || break
+                ispath(joinpath(dir, ".git")) && break
+                parent = dirname(dir)
+                parent == dir && break
+            end
+        end
+        if project_file != nothing
+            # Pkg3-style environment
+        end
     end
     return nothing
 end
