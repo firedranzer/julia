@@ -186,6 +186,10 @@ jl_value_t *jl_eval_module_expr(jl_module_t *parent_module, jl_expr_t *ex)
         newm->parent = parent_module;
         b->value = (jl_value_t*)newm;
         jl_gc_wb_binding(b, newm);
+        // copy parent environment into submodule
+        jl_sym_t *envinfo_sym = jl_symbol("#ENVINFO");
+        jl_value_t *envinfo = jl_get_global(parent_module, envinfo_sym);
+        if (envinfo) jl_set_global(newm, envinfo_sym, envinfo);
     }
     // Assume `newm` is globally reachable at this point.
 
