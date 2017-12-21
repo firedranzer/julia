@@ -90,11 +90,11 @@ end
 function find_package(from::Module, name::String)
     @info "@$(getpid()): find_package($from, $name)"
     endswith(name, ".jl") && (name = chop(name, 0, 3))
-    for dir in [Pkg.dir(); LOAD_PATH]
-        dir = abspath(dir)
-        @return_if_file joinpath(dir, "$name.jl")
-        @return_if_file joinpath(dir, "$name.jl", "src", "$name.jl")
-        @return_if_file joinpath(dir,   name,     "src", "$name.jl")
+    for env in LOAD_PATH
+        env = string(env)
+        @return_if_file joinpath(env, "$name.jl")
+        @return_if_file joinpath(env, "$name.jl", "src", "$name.jl")
+        @return_if_file joinpath(env,   name,     "src", "$name.jl")
     end
     return nothing
 end

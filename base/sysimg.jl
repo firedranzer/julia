@@ -488,6 +488,7 @@ using Base
 pushfirst!(Base._included_files, (@__MODULE__, joinpath(@__DIR__, "sysimg.jl")))
 
 # load some stdlib packages but don't put their names in Main
+unshift!(LOAD_PATH, joinpath("..", "stdlib"))
 Base.require(Base, :Base64)
 Base.require(Base, :CRC32c)
 Base.require(Base, :Dates)
@@ -503,6 +504,7 @@ Base.require(Base, :Test)
 Base.require(Base, :Unicode)
 Base.require(Base, :Distributed)
 Base.require(Base, :Printf)
+empty!(LOAD_PATH)
 
 @eval Base begin
     @deprecate_binding Test root_module(:Test) true ", run `using Test` instead"
@@ -511,8 +513,6 @@ Base.require(Base, :Printf)
     @deprecate_binding Dates root_module(:Dates) true ", run `using Dates` instead"
     @deprecate_binding Distributed root_module(:Distributed) true ", run `using Distributed` instead"
 end
-
-empty!(LOAD_PATH)
 
 Base.isfile("userimg.jl") && Base.include(Main, "userimg.jl")
 
