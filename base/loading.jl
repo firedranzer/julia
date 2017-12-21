@@ -88,6 +88,7 @@ macro return_if_file(path)
 end
 
 function find_package(from::Module, name::String)
+    @info "@$(getpid()): find_package($from, $name)"
     endswith(name, ".jl") && (name = chop(name, 0, 3))
     for dir in [Pkg.dir(); LOAD_PATH]
         dir = abspath(dir)
@@ -315,7 +316,6 @@ Windows.
 """
 function require(from::Module, mod::Symbol)
     if !root_module_exists(mod)
-        @info "@$(getpid()): require($from, $mod)"
         _require(from, mod)
         for callback in package_callbacks
             invokelatest(callback, mod)
