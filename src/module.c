@@ -27,7 +27,6 @@ JL_DLLEXPORT jl_module_t *jl_new_module(jl_sym_t *name)
     m->name = name;
     m->parent = NULL;
     m->istopmod = 0;
-    m->envinfo = NULL;
     static unsigned int mcounter; // simple counter backup, in case hrtime is not incrementing
     m->uuid = jl_hrtime() + (++mcounter);
     if (!m->uuid)
@@ -74,16 +73,6 @@ JL_DLLEXPORT void jl_set_istopmod(jl_module_t *self, uint8_t isprimary)
 JL_DLLEXPORT uint8_t jl_istopmod(jl_module_t *mod)
 {
     return mod->istopmod;
-}
-
-JL_DLLEXPORT void jl_set_module_envinfo(jl_module_t *self, jl_value_t *envinfo)
-{
-    self->envinfo = envinfo;
-}
-
-JL_DLLEXPORT jl_value_t *jl_module_envinfo(jl_module_t *self)
-{
-    return self->envinfo;
 }
 
 static jl_binding_t *new_binding(jl_sym_t *name)

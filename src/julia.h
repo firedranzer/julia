@@ -430,7 +430,6 @@ typedef struct _jl_module_t {
     size_t primary_world;
     uint32_t counter;
     uint8_t istopmod;
-    jl_value_t *envinfo;
 } jl_module_t;
 
 // one Type-to-Value entry
