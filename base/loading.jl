@@ -87,7 +87,7 @@ macro return_if_file(path)
     end
 end
 
-function find_package(name::String)
+function find_package(from::Module, name::String)
     endswith(name, ".jl") && (name = chop(name, 0, 3))
     for dir in [Pkg.dir(); LOAD_PATH]
         dir = abspath(dir)
@@ -145,7 +145,7 @@ function _require_from_serialized(from::Module, mod::Symbol, path_to_try::String
                 depmods[i] = M
             end
         else
-            modpath = find_package(string(modname))
+            modpath = find_package(from, string(modname))
             modpath === nothing && return ErrorException("Required dependency $modname not found in current path.")
             mod = _require_search_from_serialized(from, modname, String(modpath))
             if !isa(mod, Bool)
@@ -184,7 +184,7 @@ end
 function _require_search_from_serialized(from::Module, mod::Symbol, sourcepath::String)
     paths = find_all_in_cache_path(mod)
     for path_to_try in paths::Vector{String}
-        deps = stale_cachefile(sourcepath, path_to_try)
+        deps = stale_cachefile(from, sourcepath, path_to_try)
         if deps === true
             continue
         end
@@ -315,7 +315,7 @@ Windows.
 """
 function require(from::Module, mod::Symbol)
     if !root_module_exists(mod)
-        # @info "@$(getpid()): require($from, $mod)"
+        @info "@$(getpid()): require($from, $mod)"
         _require(from, mod)
         for callback in package_callbacks
             invokelatest(callback, mod)
@@ -391,7 +391,7 @@ function _require(from::Module, mod::Symbol)
         toplevel_load[] = false
         # perform the search operation to select the module file require intends to load
         name = string(mod)
-        path = find_package(name)
+        path = find_package(from, name)
         if path === nothing
             throw(ArgumentError("Module $name not found in current path.\nRun `Pkg.add(\"$name\")` to install the $name package."))
         end
@@ -422,7 +422,7 @@ function _require(from::Module, mod::Symbol)
         if doneprecompile === true || JLOptions().incremental != 0
             # spawn off a new incremental pre-compile task for recursive `require` calls
             # or if the require search declared it was pre-compiled before (and therefore is expected to still be pre-compilable)
-            cachefile = compilecache(mod)
+            cachefile = compilecache(from, mod)
             m = _require_from_serialized(from, mod, cachefile)
             if isa(m, Exception)
                 @warn "The call to compilecache failed to create a usable precompiled cache file for module $name" exception=m
@@ -442,7 +442,7 @@ function _require(from::Module, mod::Symbol)
                 rethrow() # rethrow non-precompilable=true errors
             end
             # the file requested `__precompile__`, so try to build a cache file and use that
-            cachefile = compilecache(mod)
+            cachefile = compilecache(from, mod)
             m = _require_from_serialized(from, mod, cachefile)
             if isa(m, Exception)
                 @warn """Module `$mod` declares `__precompile__(true)` but `require` failed
@@ -587,10 +587,10 @@ function create_expr_cache(input::String, output::String, concrete_deps::typeof(
     return io
 end
 
-compilecache(mod::Symbol) = compilecache(string(mod))
+compilecache(from::Module, mod::Symbol) = compilecache(from, string(mod))
 
 """
-    Base.compilecache(module::String)
+    Base.compilecache(from::Module, module::String)
 
 Creates a precompiled cache file for
 a module and all of its dependencies.
@@ -599,9 +599,9 @@ This can be used to reduce package load times. Cache files are stored in
 [Module initialization and precompilation](@ref)
 for important notes.
 """
-function compilecache(name::String)
+function compilecache(from::Module, name::String)
     # decide where to get the source file from
-    path = find_package(name)
+    path = find_package(from, name)
     path === nothing && throw(ArgumentError("$name not found in path"))
     path = String(path)
     # decide where to put the resulting cache file
@@ -734,7 +734,7 @@ end
 
 # returns true if it "cachefile.ji" is stale relative to "modpath.jl"
 # otherwise returns the list of dependencies to also check
-function stale_cachefile(modpath::String, cachefile::String)
+function stale_cachefile(from::Module, modpath::String, cachefile::String)
     io = open(cachefile, "r")
     try
         if !isvalid_cache_header(io)
@@ -751,7 +751,7 @@ function stale_cachefile(modpath::String, cachefile::String)
                 continue
             end
             name = string(mod)
-            path = find_package(name)
+            path = find_package(from, name)
             if path === nothing
                 @debug "Rejecting cache file $cachefile because dependency $name not found."
                 return true # Won't be able to fullfill dependency
