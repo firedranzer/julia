@@ -374,7 +374,7 @@ _replace(io, repl::Function, str, r, pattern) =
     print(io, repl(SubString(str, first(r), last(r))))
 
 # TODO: rename to `replace` when `replace` is removed from deprecated.jl
-function replace_new(str::String, pattern, repl, count::Integer)
+function replace_new(str::Union{String,SubString{String}}, pattern, repl, count::Integer)
     count == 0 && return str
     count < 0 && throw(DomainError(count, "`count` must be non-negative."))
     n = 1
