@@ -159,6 +159,9 @@ implicit_env_files(path::String, name::String) = [
 ]
 
 function find_package(from::Module, name::String)
+    Core.println(LOAD_PATH)
+    Core.println(DEPOT_PATH)
+    Core.println("find_package($from, $name)")
     endswith(name, ".jl") && (name = chop(name, 0, 3))
     if isdefined(from, ENVINFO)
         manifest_file, from_uuid = getfield(from, ENVINFO)::Tuple{String,UUID}
@@ -166,6 +169,7 @@ function find_package(from::Module, name::String)
     end
     project_file = nothing
     for env in LOAD_PATH
+        # TODO: env isa Vector
         if env isa String
             path = abspath(env)
             ispath(path) || continue
@@ -183,8 +187,7 @@ function find_package(from::Module, name::String)
                 # no project file – implicit environment
                 if project_file == nothing
                     for file in implicit_env_files(path, name)
-                        isfile_casesensitive(file) || continue
-                        return project_file
+                        isfile_casesensitive(file) && return file
                     end
                 end
             end
@@ -236,6 +239,7 @@ function find_package(from::Module, name::String)
 end
 
 function find_package_in_project(project_file::String, name::String)
+    Core.println("find_package_in_project($project_file, $name)")
     open(project_file) do io
         for line in eachline(io)
             # look for the [deps] section
@@ -271,6 +275,7 @@ function find_package_in_project(project_file::String, name::String)
 end
 
 function find_package_in_manifest(manifest_file::String, from_uuid::UUID, name::String)
+    Core.println("find_package_in_manifest($manifest_file, $from_uuid, $name)")
     open(manifest_file) do io
         # scan manifest for stanza with `uuid = "$from_uuid"`
         found = in_deps = false
@@ -309,6 +314,7 @@ function find_package_in_manifest(manifest_file::String, from_uuid::UUID, name::
 end
 
 function find_package_in_manifest(manifest_file::String, name::String, io::IO)
+    Core.println("find_package_in_manifest($manifest_file, $name, $io)")
     # name of package to be loaded must be unique
     found = false
     path = uuid = hash = nothing
@@ -356,6 +362,7 @@ function find_package_in_manifest(manifest_file::String, name::String, io::IO)
 end
 
 function find_package_in_manifest(manifest_file::String, uuid::UUID, io::IO)
+    Core.println("find_package_in_manifest($manifest_file, $uuid, $io)")
     # uuid of package to be loaded
     uuid′ = name = path = hash = nothing
     for line in eachline(io)

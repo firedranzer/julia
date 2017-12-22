@@ -438,8 +438,11 @@ include("threadcall.jl")
 # code loading
 include("loading.jl")
 
-# set up load path to be able to find stdlib packages
-init_load_path(ccall(:jl_get_julia_bindir, Any, ()))
+# set up depot & load paths to be able to find stdlib packages
+let BINDIR = ccall(:jl_get_julia_bindir, Any, ())
+    init_depot_path(BINDIR)
+    init_load_path(BINDIR)
+end
 
 INCLUDE_STATE = 3 # include = include_relative
 
@@ -474,6 +477,7 @@ function __init__()
     global_logger(SimpleLogger(STDERR))
     Multimedia.reinit_displays() # since Multimedia.displays uses STDOUT as fallback
     early_init()
+    init_depot_path()
     init_load_path()
     init_threadcall()
 end
@@ -488,7 +492,6 @@ using Base
 pushfirst!(Base._included_files, (@__MODULE__, joinpath(@__DIR__, "sysimg.jl")))
 
 # load some stdlib packages but don't put their names in Main
-unshift!(LOAD_PATH, joinpath("..", "stdlib"))
 Base.require(Base, :Base64)
 Base.require(Base, :CRC32c)
 Base.require(Base, :Dates)
