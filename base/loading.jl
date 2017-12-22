@@ -316,10 +316,10 @@ function find_package_in_manifest(manifest_file::String, name::String, io::IO)
             found = m.captures[1] == name
         elseif (m = match(r"^\s*path\s*=\s*\"(.*)\"\s*$", line)) != nothing
             found && (path = m.captures[1])
-        elseif (m = match(r"^\s*uuid\s*=\s*\"(.*)\"\s*$", line)) != nothing
-            found && (uuid = UUID(m.captures[1]))
         elseif (m = match(r"^\s*hash-sha1\s*=\s*\"(.*)\"\s*$", line)) != nothing
             found && (hash = SHA1(m.captures[1]))
+        elseif (m = match(r"^\s*uuid\s*=\s*\"(.*)\"\s*$", line)) != nothing
+            found && (uuid = UUID(m.captures[1]))
         end
     end
     if !found
@@ -343,6 +343,7 @@ function find_package_in_manifest(manifest_file::String, name::String, io::IO)
             $name/$uuid not installed at $(repr(path))
              - manifest = $(repr(manifest_file))
             """
+        return nothing
     end
     if uuid != nothing && hash != nothing
         path = find_installed(uuid, hash)
@@ -354,13 +355,42 @@ end
 
 function find_package_in_manifest(manifest_file::String, uuid::UUID, io::IO)
     # uuid of package to be loaded
-
-    # scan manifest for stanza with `uuid = "$uuid"`
-    # look for `path = "$path"` in that stanza
-    # if that exists, load it; otherwise
-    # look for `git-sha1-hash = "$hash"` in stanza
-    # if that exists, look for it in DEPOT_PATH
-    # returns nothing | path, uuid, manifest_file
+    uuid′ = name = path = hash = nothing
+    for line in eachline(io)
+        if (m = match(r"^\s*\[\s*\[\s*(\w+)\s*\]\s*\]\s*$", line)) != nothing
+            uuid′ == uuid && break
+            name = m.captures[1]
+            path = hash = nothing
+        elseif (m = match(r"^\s*path\s*=\s*\"(.*)\"\s*$", line)) != nothing
+            path = m.captures[1]
+        elseif (m = match(r"^\s*hash-sha1\s*=\s*\"(.*)\"\s*$", line)) != nothing
+            hash = SHA1(m.captures[1])
+        elseif (m = match(r"^\s*uuid\s*=\s*\"(.*)\"\s*$", line)) != nothing
+            uuid′ = UUID(m.captures[1])
+        end
+    end
+    if uuid != uuid′
+        @warn """
+            $uuid referenced in manifest but not found
+             - manifest = $(repr(manifest_file))
+            """
+        return nothing
+    end
+    if path != nothing
+        path = abspath(dirname(manifest_file), path)
+        ispath(path) && return path, uuid, manifest_file
+        @warn """
+            $name/$uuid not installed at $(repr(path))
+             - manifest = $(repr(manifest_file))
+            """
+        return nothing
+    end
+    if hash != nothing
+        path = find_installed(uuid, hash)
+        ispath(path) && return path, uuid, manifest_file
+        # TODO: prompt for installation
+    end
+    return nothing
 end
 
 function find_package_in_manifest(manifest_file::String, uuid::UUID)
