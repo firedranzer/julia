@@ -80,6 +80,71 @@ else
     end
 end
 
+## SHA1 ##
+
+struct SHA1
+    bytes::Vector{UInt8}
+    function SHA1(bytes::Vector{UInt8})
+        length(bytes) == 20 ||
+            throw(ArgumentError("wrong number of bytes for SHA1 hash: $(length(bytes))"))
+        return new(bytes)
+    end
+end
+
+Base.convert(::Type{SHA1}, s::String) = SHA1(hex2bytes(s))
+Base.convert(::Type{Vector{UInt8}}, hash::SHA1) = hash.bytes
+Base.convert(::Type{String}, hash::SHA1) = bytes2hex(Vector{UInt8}(hash))
+
+Base.string(hash::SHA1) = String(hash)
+Base.show(io::IO, hash::SHA1) = print(io, "SHA1(", String(hash), ")")
+Base.isless(a::SHA1, b::SHA1) = lexless(a.bytes, b.bytes)
+Base.hash(a::SHA1, h::UInt) = hash((SHA1, a.bytes), h)
+Base.:(==)(a::SHA1, b::SHA1) = a.bytes == b.bytes
+
+## package path slugs ##
+
+const SlugInt = UInt32 # max p = 4
+const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+const nchars = SlugInt(length(chars))
+const max_p = floor(Int, log(nchars, typemax(SlugInt) >>> 8))
+
+function slug(x::SlugInt, p::Int)
+    1 ≤ p ≤ max_p || # otherwise previous steps are wrong
+        error("invalid slug size: $p (need 1 ≤ p ≤ $max_p)")
+    return sprint() do io
+        for i = 1:p
+            x, d = divrem(x, nchars)
+            write(io, chars[1+d])
+        end
+    end
+end
+slug(x::Integer, p::Int) = slug(SlugInt(x), p)
+
+function slug(bytes::Vector{UInt8}, p::Int)
+    n = nchars^p
+    x = zero(SlugInt)
+    for (i, b) in enumerate(bytes)
+        x = (x + b*powermod(2, 8(i-1), n)) % n
+    end
+    slug(x, p)
+end
+
+slug(uuid::UUID, p::Int=4) = slug(uuid.value % nchars^p, p)
+slug(sha1::SHA1, p::Int=4) = slug(sha1.bytes, p)
+
+version_slug(uuid::UUID, sha1::SHA1) = joinpath(slug(uuid), slug(sha1))
+
+function find_installed(uuid::UUID, sha1::SHA1)
+    slug = version_slug(uuid, sha1)
+    for depot in DEPOT_PATH
+        path = abspath(depot, "packages", slug)
+        ispath(path) && return path
+    end
+    return abspath(DEPOT_PATH[1], "packages", slug)
+end
+
+## finding packages ##
+
 const ENVINFO = Symbol("#ENVINFO")
 
 const project_names = ["JuliaProject.toml", "Project.toml"]
@@ -94,8 +159,8 @@ implicit_env_files(path::String, name::String) = [
 function find_package(from::Module, name::String)
     endswith(name, ".jl") && (name = chop(name, 0, 3))
     if isdefined(from, ENVINFO)
-        manifest_file, uuid = getfield(from, ENVINFO)::Tuple{String,UUID}
-        return find_package_in_manifest(manifest_file, uuid, name)
+        manifest_file, from_uuid = getfield(from, ENVINFO)::Tuple{String,UUID}
+        return find_package_in_manifest(manifest_file, from_uuid, name)
     end
     project_file = nothing
     for env in LOAD_PATH
@@ -203,11 +268,7 @@ function find_package_in_project(project_file::String, name::String)
     end
 end
 
-function find_package_in_manifest(
-    manifest_file::String,
-    from_uuid::UUID, # uuid of package doing the loading
-    name::String,    # name of package to be loaded
-)
+function find_package_in_manifest(manifest_file::String, from_uuid::UUID, name::String)
     open(manifest_file) do io
         # scan manifest for stanza with `uuid = "$from_uuid"`
         found = in_deps = false
@@ -236,31 +297,76 @@ function find_package_in_manifest(
                 end
                 # TODO: give better feedback on unregistered dependency
                 isempty(search(deps_str, repr(name))) && return nothing
-                return find_package_in_manifest(seekstart(io), name)
+                return find_package_in_manifest(manifest_file, name, seekstart(io))
             end
             found && uuid != nothing && break
         end
         found && uuid != nothing || return nothing
-        find_package_in_manifest(seekstart(io), uuid)
+        return find_package_in_manifest(manifest_file, uuid, seekstart(io))
     end
 end
 
-function find_package_in_manifest(
-    manifest_file::String,
-    name::String, # name of package to be loaded (must be unique)
-)
-    
+function find_package_in_manifest(manifest_file::String, name::String, io::IO)
+    # name of package to be loaded must be unique
+    found = false
+    path = uuid = hash = nothing
+    for line in eachline(io)
+        if (m = match(r"^\s*\[\s*\[\s*(\w+)\s*\]\s*\]\s*$", line)) != nothing
+            found && break
+            found = m.captures[1] == name
+        elseif (m = match(r"^\s*path\s*=\s*\"(.*)\"\s*$", line)) != nothing
+            found && (path = m.captures[1])
+        elseif (m = match(r"^\s*uuid\s*=\s*\"(.*)\"\s*$", line)) != nothing
+            found && (uuid = UUID(m.captures[1]))
+        elseif (m = match(r"^\s*hash-sha1\s*=\s*\"(.*)\"\s*$", line)) != nothing
+            found && (hash = SHA1(m.captures[1]))
+        end
+    end
+    if !found
+        @warn """
+            $name referenced in manifest but not found
+             - manifest = $(repr(manifest_file))
+            """
+        return nothing
+    end
+    if uuid == nothing
+        @warn """
+            $name appears in manifest with no UUID
+             - manifest = $(repr(manifest_file))
+            """
+        return nothing
+    end
+    path != nothing
+        path = abspath(dirname(manifest_file), path)
+        ispath(path) && return path, uuid, manifest_file
+        @warn """
+            $name/$uuid not installed at $(repr(path))
+             - manifest = $(repr(manifest_file))
+            """
+    end
+    if uuid != nothing && hash != nothing
+        path = find_installed(uuid, hash)
+        ispath(path) && return path, uuid, manifest_file
+        # TODO: prompt for installation
+    end
+    return nothing
 end
 
-function find_package_in_manifest(
-    manifest_file::String,
-    uuid::UUID, # uuid of package to be loaded
-)
+function find_package_in_manifest(manifest_file::String, uuid::UUID, io::IO)
+    # uuid of package to be loaded
+
     # scan manifest for stanza with `uuid = "$uuid"`
     # look for `path = "$path"` in that stanza
     # if that exists, load it; otherwise
     # look for `git-sha1-hash = "$hash"` in stanza
     # if that exists, look for it in DEPOT_PATH
+    # returns nothing | path, uuid, manifest_file
+end
+
+function find_package_in_manifest(manifest_file::String, uuid::UUID)
+    open(manifest_file) do io
+        find_package_in_manifest(manifest_file, uuid, io)
+    end
 end
 
 function find_source_file(path::String)
