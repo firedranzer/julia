@@ -168,11 +168,67 @@ function find_package(from::Module, name::String)
         end
         if project_file != nothing
             # fine name in explicit env project file
-            found = find_package_in_project(name, project_file)
+            found = find_package_in_project(project_file, name)
             found != nothing && return found
         end
     end
     return nothing
+end
+
+function find_package_in_project(project_file::String, name::String)
+    open(project_file) do io
+        for line in eachline(io)
+            # look for the [deps] section
+            ismatch(r"^\s*\[\s*(\")deps\1\s*\]\s*$") && break
+            # TODO: look for `manifest = "$manifest_file"` entry?
+        end
+        eof(io) && return nothing
+        for line in eachline(io)
+            # look for `$name = "$uuid"` entry
+            m = match(r"^(?:\s*(?:#.*)?|\s*(\w+)\s*=\"(.*)\"\s*)", line)
+            m == nothing && return nothing
+            m.captures[1] == nothing || m.captures[1] != name && continue
+            uuid = UUID(m.captures[2]) # TODO: allow path?
+            dir = dirname(project_file)
+            manifest_file = nothing
+            for name in manifest_names
+                file = abspath(dir, name)
+                isfile_casesensitive(file) || continue
+                manifest_file = file
+                break
+            end
+            manifest_file != nothing &&
+                return find_package_in_manifest(manifest_file, uuid)
+            @warn """
+                $name/$uuid in project file but not in manifest
+                 - project = $(repr(project_file))
+                 - manifest = $(repr(manifest_file))
+                """
+        end
+    end
+    return nothing
+end
+
+function find_package_in_manifest(
+    manifest_file::String,
+    from_uuid::UUID, # uuid of package doing the loading
+    name::String,    # name of package to be loaded
+)
+    # scan manifest for stanza with `uuid = "$from_uuid"`
+    # look up `$name` in deps entry in that stanza
+    # resolve that to a `$uuid` value
+    # return find_package_in_manifest(manifest_file, uuid)
+end
+
+function find_package_in_manifest(
+    manifest_file::String,
+    uuid::UUID, # uuid of package to be loaded
+)
+    # scan manifest for stanza with `uuid = "$uuid"`
+    # look for `path = "$path"` in that stanza
+    # if that exists, load it; otherwise
+    # look for `git-sha1-hash = "$hash"` in stanza
+    # if that exists, look for it in DEPOT_PATH
 end
 
 function find_source_file(path::String)
