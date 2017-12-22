@@ -80,6 +80,13 @@ else
     end
 end
 
+struct EnvInfo
+    entry_point::String
+    project_file::String
+    manifest_file::String
+    package_uuid::UUID
+end
+
 const ENVINFO = Symbol("#ENVINFO")
 
 const project_names = ["JuliaProject.toml", "Project.toml"]
@@ -93,37 +100,43 @@ implicit_env_files(path::String, name::String) = [
 
 function find_package(from::Module, name::String)
     endswith(name, ".jl") && (name = chop(name, 0, 3))
-    project_file = from_path = from_project = from_uuid = nothing
     if isdefined(from, ENVINFO)
-        from_path, from_project, from_uuid = getfield(from, ENVINFO)
+        envinfo = getfield(from, ENVINFO)::EnvInfo
+        return find_package_in_manifest(envinfo, name)
     end
+    project_file = nothing
     for env in LOAD_PATH
         if env isa String
             path = abspath(env)
             ispath(path) || continue
+            # is env a path to a project file?
             if endswith(path, ".toml") && isfile_casesensitive(path)
                 project_file = path
             elseif isdir(path)
+                # or a directory with a project file?
                 for name in project_names
                     file = abspath(path, name)
                     isfile_casesensitive(file) || continue
                     project_file = file
                     break
                 end
+                # no project file – implicit environment
                 if project_file == nothing
                     for file in implicit_env_files(path, name)
                         isfile_casesensitive(file) || continue
-                        return file, file, nothing
+                        return project_file # TODO: what to return?
                     end
                 end
             end
         elseif env isa NamedEnv
+            # look for named env in each depot
             for (i, depot) in enumerate(DEPOT_PATH)
                 isdir(depot) || continue
                 for name in project_names
                     file = abspath(depot, "environments", env.name, name)
                     exists = isfile_casesensitive(file)
                     if i == 1 && !exists && env.create
+                        # try creating named env in DEPOT_PATH[1]
                         try mkpath(dirname(file))
                             touch(file)
                         catch err
@@ -137,6 +150,7 @@ function find_package(from::Module, name::String)
                 end
             end
         elseif env isa CurrentEnv
+            # look for project file in current dir and parents
             dir = pwd()
             while true
                 for name in project_names
@@ -146,13 +160,16 @@ function find_package(from::Module, name::String)
                     break
                 end
                 project_file == nothing || break
+                # bail out if we hit a git repo dir
                 ispath(joinpath(dir, ".git")) && break
                 parent = dirname(dir)
                 parent == dir && break
             end
         end
         if project_file != nothing
-            # Pkg3-style environment
+            # fine name in explicit env project file
+            found = find_package_in_project(name, project_file)
+            found != nothing && return found
         end
     end
     return nothing
