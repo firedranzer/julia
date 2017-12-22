@@ -80,13 +80,6 @@ else
     end
 end
 
-struct EnvInfo
-    entry_point::String
-    project_file::String
-    manifest_file::String
-    package_uuid::UUID
-end
-
 const ENVINFO = Symbol("#ENVINFO")
 
 const project_names = ["JuliaProject.toml", "Project.toml"]
@@ -101,8 +94,8 @@ implicit_env_files(path::String, name::String) = [
 function find_package(from::Module, name::String)
     endswith(name, ".jl") && (name = chop(name, 0, 3))
     if isdefined(from, ENVINFO)
-        envinfo = getfield(from, ENVINFO)::EnvInfo
-        return find_package_in_manifest(envinfo, name)
+        manifest_file, uuid = getfield(from, ENVINFO)::Tuple{String,UUID}
+        return find_package_in_manifest(manifest_file, uuid, name)
     end
     project_file = nothing
     for env in LOAD_PATH
@@ -124,7 +117,7 @@ function find_package(from::Module, name::String)
                 if project_file == nothing
                     for file in implicit_env_files(path, name)
                         isfile_casesensitive(file) || continue
-                        return project_file # TODO: what to return?
+                        return project_file
                     end
                 end
             end
@@ -179,34 +172,35 @@ function find_package_in_project(project_file::String, name::String)
     open(project_file) do io
         for line in eachline(io)
             # look for the [deps] section
-            ismatch(r"^\s*\[\s*(\")deps\1\s*\]\s*$") && break
+            ismatch(r"^\s*\[\s*deps\s*\]\s*$", line) && break
             # TODO: look for `manifest = "$manifest_file"` entry?
         end
         eof(io) && return nothing
+        uuid = nothing
         for line in eachline(io)
             # look for `$name = "$uuid"` entry
-            m = match(r"^(?:\s*(?:#.*)?|\s*(\w+)\s*=\"(.*)\"\s*)", line)
+            m = match(r"^(?:\s*(?:#.*)?|\s*(\w+)\s*=\"(.*)\"\s*)$", line)
             m == nothing && return nothing
             m.captures[1] == nothing || m.captures[1] != name && continue
             uuid = UUID(m.captures[2]) # TODO: allow path?
-            dir = dirname(project_file)
-            manifest_file = nothing
-            for name in manifest_names
-                file = abspath(dir, name)
-                isfile_casesensitive(file) || continue
-                manifest_file = file
-                break
-            end
-            manifest_file != nothing &&
-                return find_package_in_manifest(manifest_file, uuid)
-            @warn """
-                $name/$uuid in project file but not in manifest
-                 - project = $(repr(project_file))
-                 - manifest = $(repr(manifest_file))
-                """
         end
+        uuid == nothing && return nothing
+        dir = dirname(project_file)
+        manifest_file = nothing
+        for name in manifest_names
+            file = abspath(dir, name)
+            isfile_casesensitive(file) || continue
+            manifest_file = file
+            break
+        end
+        manifest_file != nothing &&
+            return find_package_in_manifest(manifest_file, uuid)
+        @warn """
+            $name/$uuid in project file but not in manifest
+             - project = $(repr(project_file))
+             - manifest = $(repr(manifest_file))
+            """
     end
-    return nothing
 end
 
 function find_package_in_manifest(
@@ -214,10 +208,48 @@ function find_package_in_manifest(
     from_uuid::UUID, # uuid of package doing the loading
     name::String,    # name of package to be loaded
 )
-    # scan manifest for stanza with `uuid = "$from_uuid"`
-    # look up `$name` in deps entry in that stanza
-    # resolve that to a `$uuid` value
-    # return find_package_in_manifest(manifest_file, uuid)
+    open(manifest_file) do io
+        # scan manifest for stanza with `uuid = "$from_uuid"`
+        found = in_deps = false
+        deps_str = uuid = nothing
+        for line in eachline(io)
+            if !in_deps
+                if ismatch(r"^\s*\[\s*\[\s*\w+\s*\]\s*\]\s*$", line)
+                    found = in_deps = false
+                    deps_str = uuid = nothing
+                elseif (m = match(r"^\s*uuid\s*=\s*\"(.*)\"\s*$", line)) != nothing
+                    found = from_uuid == UUID(m.captures[1])
+                elseif (m = match(r"^\s*deps\s*=\s*(.*?)\s*$", line)) != nothing
+                    deps_str = m.captures[1]
+                elseif (m = match(r"^\s*\[\s*\w+\s*\.\s*deps\s*\]\s*$", line)) != nothing
+                    in_deps = true
+                end
+            else # in_deps
+                if (m = match(r"^\s*(\w+)\s*=\"(.*)\"\s*$")) != nothing
+                    m.captures[1] == name && (uuid = UUID(m.captures[2]))
+                end
+            end
+            if found && uuid == nothing && deps_str != nothing
+                if deps_str[1] != '[' || deps_str[end] != ']'
+                    @warn "Unexpected TOML deps format:\n$deps_str"
+                    return nothing
+                end
+                # TODO: give better feedback on unregistered dependency
+                isempty(search(deps_str, repr(name))) && return nothing
+                return find_package_in_manifest(seekstart(io), name)
+            end
+            found && uuid != nothing && break
+        end
+        found && uuid != nothing || return nothing
+        find_package_in_manifest(seekstart(io), uuid)
+    end
+end
+
+function find_package_in_manifest(
+    manifest_file::String,
+    name::String, # name of package to be loaded (must be unique)
+)
+    
 end
 
 function find_package_in_manifest(
