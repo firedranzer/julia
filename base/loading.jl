@@ -153,7 +153,6 @@ const project_names = ["JuliaProject.toml", "Project.toml"]
 const manifest_names = ["JuliaManifest.toml", "Manifest.toml"]
 
 function find_env(envs::Vector)
-    Core.println("envs = $envs")
     for env in envs
         path = find_env(env)
         path != nothing && return path
@@ -161,9 +160,7 @@ function find_env(envs::Vector)
 end
 
 function find_env(env::String)
-    Core.println("env = $env")
     path = abspath(env)
-    ispath(path) || return nothing
     if isdir(path)
         # directory with a project file?
         for name in project_names
@@ -171,12 +168,10 @@ function find_env(env::String)
             isfile_casesensitive(file) && return file
         end
     end
-    # package dir or path to project file
     return path
 end
 
 function find_env(env::NamedEnv)
-    Core.println("env = $env")
     # look for named env in each depot
     for depot in DEPOT_PATH
         isdir(depot) || continue
@@ -190,11 +185,9 @@ function find_env(env::NamedEnv)
 end
 
 function find_env(env::CurrentEnv, dir::String = pwd())
-    Core.println("env = $env")
     # look for project file in current dir and parents
     home = homedir()
     while true
-        Core.println("dir = $dir")
         for name in project_names
             file = joinpath(dir, name)
             isfile_casesensitive(file) && return file
