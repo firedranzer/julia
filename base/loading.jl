@@ -153,6 +153,7 @@ const project_names = ["JuliaProject.toml", "Project.toml"]
 const manifest_names = ["JuliaManifest.toml", "Manifest.toml"]
 
 function find_env(envs::Vector)
+    Core.println("envs = $envs")
     for env in envs
         path = find_env(env)
         path != nothing && return path
@@ -160,6 +161,7 @@ function find_env(envs::Vector)
 end
 
 function find_env(env::String)
+    Core.println("env = $env")
     path = abspath(env)
     ispath(path) || return nothing
     if isdir(path)
@@ -174,28 +176,33 @@ function find_env(env::String)
 end
 
 function find_env(env::NamedEnv)
+    Core.println("env = $env")
     # look for named env in each depot
-    for (i, depot) in enumerate(DEPOT_PATH)
+    for depot in DEPOT_PATH
         isdir(depot) || continue
+        file = nothing
         for name in project_names
             file = abspath(depot, "environments", env.name, name)
-            (i == 1 && env.create || isfile_casesensitive(file)) && return file
+            isfile_casesensitive(file) && return file
         end
+        file != nothing && env.create && return file
     end
 end
 
 function find_env(env::CurrentEnv, dir::String = pwd())
+    Core.println("env = $env")
     # look for project file in current dir and parents
     home = homedir()
     while true
+        Core.println("dir = $dir")
         for name in project_names
             file = joinpath(dir, name)
             isfile_casesensitive(file) && return file
         end
         # bail at home directory or top of git repo
-        dir == home || ispath(joinpath(dir, ".git")) && break
-        parent = dirname(dir)
-        parent == dir && break
+        (dir == home || ispath(joinpath(dir, ".git"))) && break
+        old, dir = dir, dirname(dir)
+        dir == old && break
     end
 end
 
@@ -215,14 +222,16 @@ function find_package(from::Module, name::String)
         return find_package_in_manifest(manifest_file, from_uuid, name)
     end
     for env in LOAD_PATH
+        Core.println("env = $env")
         path = find_env(env)
+        Core.println("path = $path")
         path == nothing && continue
         if isdir(path) # package directory
             for file in package_entry_points(path, name)
                 isfile_casesensitive(file) && return file
             end
         elseif endswith(path, ".toml") # project file
-            info = find_package_in_project(project_file, name)
+            info = find_package_in_project(path, name)
             info != nothing && return info
         end
     end
