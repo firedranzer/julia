@@ -90,10 +90,10 @@ struct SHA1
         return new(bytes)
     end
 end
+SHA1(s::Union{String,SubString{String}}) = SHA1(hex2bytes(s))
 
-Base.convert(::Type{SHA1}, s::String) = SHA1(hex2bytes(s))
-Base.convert(::Type{Vector{UInt8}}, hash::SHA1) = hash.bytes
 Base.convert(::Type{String}, hash::SHA1) = bytes2hex(Vector{UInt8}(hash))
+Base.convert(::Type{Vector{UInt8}}, hash::SHA1) = hash.bytes
 
 Base.string(hash::SHA1) = String(hash)
 Base.show(io::IO, hash::SHA1) = print(io, "SHA1(", String(hash), ")")
@@ -168,6 +168,7 @@ function find_env(env::String)
             isfile_casesensitive(file) && return file
         end
     end
+    # package dir or path to project file
     return path
 end
 
@@ -206,18 +207,14 @@ package_entry_points(path::String, name::String) = [
 ]
 
 function find_package(from::Module, name::String)
-    endswith(name, ".jl") && (name = chop(name, 0, 3))
-    Core.println(LOAD_PATH)
-    Core.println(DEPOT_PATH)
     Core.println("find_package($from, $name)")
+    endswith(name, ".jl") && (name = chop(name, 0, 3))
     if isdefined(from, ENVINFO)
         manifest_file, from_uuid = getfield(from, ENVINFO)::Tuple{String,UUID}
         return find_package_in_manifest(manifest_file, from_uuid, name)
     end
     for env in LOAD_PATH
-        Core.println("env = $env")
         path = find_env(env)
-        Core.println("path = $path")
         path == nothing && continue
         if isdir(path) # package directory
             for file in package_entry_points(path, name)
@@ -239,16 +236,16 @@ function find_package_in_project(project_file::String, name::String)
             ismatch(r"^\s*\[\s*deps\s*\]\s*$", line) && break
             # TODO: look for `manifest = "$manifest_file"` entry?
         end
-        eof(io) && return nothing
         uuid = nothing
         for line in eachline(io)
             # look for `$name = "$uuid"` entry
-            m = match(r"^(?:\s*(?:#.*)?|\s*(\w+)\s*=\"(.*)\"\s*)$", line)
+            m = match(r"^(?:\s*(?:#.*)?|\s*(\w+)\s*=\s*\"(.*)\"\s*)$", line)
             m == nothing && return nothing
-            m.captures[1] == nothing || m.captures[1] != name && continue
+            m.captures[1] != name && continue
             uuid = UUID(m.captures[2]) # TODO: allow path?
         end
         uuid == nothing && return nothing
+        # TODO: manifest path from project file
         dir = dirname(project_file)
         manifest_file = nothing
         for mfst in manifest_names
