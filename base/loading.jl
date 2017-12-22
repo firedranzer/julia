@@ -152,94 +152,85 @@ const ENVINFO = Symbol("#ENVINFO")
 const project_names = ["JuliaProject.toml", "Project.toml"]
 const manifest_names = ["JuliaManifest.toml", "Manifest.toml"]
 
-implicit_env_files(path::String, name::String) = [
+function find_env(envs::Vector)
+    for env in envs
+        path = find_env(env)
+        path != nothing && return path
+    end
+end
+
+function find_env(env::String)
+    path = abspath(env)
+    ispath(path) || return nothing
+    if isdir(path)
+        # directory with a project file?
+        for name in project_names
+            file = abspath(path, name)
+            isfile_casesensitive(file) && return file
+        end
+    end
+    # package dir or path to project file
+    return path
+end
+
+function find_env(env::NamedEnv)
+    # look for named env in each depot
+    for (i, depot) in enumerate(DEPOT_PATH)
+        isdir(depot) || continue
+        for name in project_names
+            file = abspath(depot, "environments", env.name, name)
+            (i == 1 && env.create || isfile_casesensitive(file)) && return file
+        end
+    end
+end
+
+function find_env(env::CurrentEnv, dir::String = pwd())
+    # look for project file in current dir and parents
+    home = homedir()
+    while true
+        for name in project_names
+            file = joinpath(dir, name)
+            isfile_casesensitive(file) && return file
+        end
+        # bail at home directory or top of git repo
+        dir == home || ispath(joinpath(dir, ".git")) && break
+        parent = dirname(dir)
+        parent == dir && break
+    end
+end
+
+package_entry_points(path::String, name::String) = [
     joinpath(path, "$name.jl"),
     joinpath(path, "$name.jl", "src", "$name.jl"),
     joinpath(path,   name,     "src", "$name.jl"),
 ]
 
 function find_package(from::Module, name::String)
+    endswith(name, ".jl") && (name = chop(name, 0, 3))
     Core.println(LOAD_PATH)
     Core.println(DEPOT_PATH)
     Core.println("find_package($from, $name)")
-    endswith(name, ".jl") && (name = chop(name, 0, 3))
     if isdefined(from, ENVINFO)
         manifest_file, from_uuid = getfield(from, ENVINFO)::Tuple{String,UUID}
         return find_package_in_manifest(manifest_file, from_uuid, name)
     end
-    project_file = nothing
     for env in LOAD_PATH
-        # TODO: env isa Vector
-        if env isa String
-            path = abspath(env)
-            ispath(path) || continue
-            # is env a path to a project file?
-            if endswith(path, ".toml") && isfile_casesensitive(path)
-                project_file = path
-            elseif isdir(path)
-                # or a directory with a project file?
-                for proj in project_names
-                    file = abspath(path, proj)
-                    isfile_casesensitive(file) || continue
-                    project_file = file
-                    break
-                end
-                # no project file – implicit environment
-                if project_file == nothing
-                    for file in implicit_env_files(path, name)
-                        isfile_casesensitive(file) && return file
-                    end
-                end
+        path = find_env(env)
+        path == nothing && continue
+        if isdir(path) # package directory
+            for file in package_entry_points(path, name)
+                isfile_casesensitive(file) && return file
             end
-        elseif env isa NamedEnv
-            # look for named env in each depot
-            for (i, depot) in enumerate(DEPOT_PATH)
-                isdir(depot) || continue
-                for proj in project_names
-                    file = abspath(depot, "environments", env.name, proj)
-                    exists = isfile_casesensitive(file)
-                    if i == 1 && !exists && env.create
-                        # try creating named env in DEPOT_PATH[1]
-                        try mkpath(dirname(file))
-                            touch(file)
-                        catch err
-                            @warn "Could not create $(repr(file)):\n$err"
-                        end
-                        exists = isfile_casesensitive(file)
-                    end
-                    exists || continue
-                    project_file = file
-                    break
-                end
-            end
-        elseif env isa CurrentEnv
-            # look for project file in current dir and parents
-            dir = pwd()
-            while true
-                for proj in project_names
-                    file = joinpath(dir, proj)
-                    isfile_casesensitive(file) || continue
-                    project_file = file
-                    break
-                end
-                project_file == nothing || break
-                # bail out if we hit a git repo dir
-                ispath(joinpath(dir, ".git")) && break
-                parent = dirname(dir)
-                parent == dir && break
-            end
-        end
-        if project_file != nothing
-            # fine name in explicit env project file
-            found = find_package_in_project(project_file, name)
-            found != nothing && return found
+        elseif endswith(path, ".toml") # project file
+            info = find_package_in_project(project_file, name)
+            info != nothing && return info
         end
     end
-    return nothing
 end
 
 function find_package_in_project(project_file::String, name::String)
     Core.println("find_package_in_project($project_file, $name)")
+    isfile_casesensitive(project_file) || return nothing
     open(project_file) do io
         for line in eachline(io)
             # look for the [deps] section
@@ -276,6 +267,7 @@ end
 
 function find_package_in_manifest(manifest_file::String, from_uuid::UUID, name::String)
     Core.println("find_package_in_manifest($manifest_file, $from_uuid, $name)")
+    isfile_casesensitive(manifest_file) || return nothing
     open(manifest_file) do io
         # scan manifest for stanza with `uuid = "$from_uuid"`
         found = in_deps = false
@@ -315,7 +307,6 @@ end
 
 function find_package_in_manifest(manifest_file::String, name::String, io::IO)
     Core.println("find_package_in_manifest($manifest_file, $name, $io)")
-    # name of package to be loaded must be unique
     found = false
     path = uuid = hash = nothing
     for line in eachline(io)
@@ -403,6 +394,7 @@ function find_package_in_manifest(manifest_file::String, uuid::UUID, io::IO)
 end
 
 function find_package_in_manifest(manifest_file::String, uuid::UUID)
+    isfile_casesensitive(manifest_file) || return nothing
     open(manifest_file) do io
         find_package_in_manifest(manifest_file, uuid, io)
     end
