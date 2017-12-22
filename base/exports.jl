@@ -109,6 +109,7 @@ export
     StridedMatrix,
     StridedVecOrMat,
     StridedVector,
+    StringBytes,
     SubArray,
     SubString,
     Symmetric,
