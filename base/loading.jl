@@ -103,6 +103,8 @@ Base.:(==)(a::SHA1, b::SHA1) = a.bytes == b.bytes
 
 ## package path slugs ##
 
+import Base.Random: UUID
+
 const SlugInt = UInt32 # max p = 4
 const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 const nchars = SlugInt(length(chars))
@@ -172,8 +174,8 @@ function find_package(from::Module, name::String)
                 project_file = path
             elseif isdir(path)
                 # or a directory with a project file?
-                for name in project_names
-                    file = abspath(path, name)
+                for proj in project_names
+                    file = abspath(path, proj)
                     isfile_casesensitive(file) || continue
                     project_file = file
                     break
@@ -190,8 +192,8 @@ function find_package(from::Module, name::String)
             # look for named env in each depot
             for (i, depot) in enumerate(DEPOT_PATH)
                 isdir(depot) || continue
-                for name in project_names
-                    file = abspath(depot, "environments", env.name, name)
+                for proj in project_names
+                    file = abspath(depot, "environments", env.name, proj)
                     exists = isfile_casesensitive(file)
                     if i == 1 && !exists && env.create
                         # try creating named env in DEPOT_PATH[1]
@@ -211,8 +213,8 @@ function find_package(from::Module, name::String)
             # look for project file in current dir and parents
             dir = pwd()
             while true
-                for name in project_names
-                    file = joinpath(dir, name)
+                for proj in project_names
+                    file = joinpath(dir, proj)
                     isfile_casesensitive(file) || continue
                     project_file = file
                     break
@@ -252,8 +254,8 @@ function find_package_in_project(project_file::String, name::String)
         uuid == nothing && return nothing
         dir = dirname(project_file)
         manifest_file = nothing
-        for name in manifest_names
-            file = abspath(dir, name)
+        for mfst in manifest_names
+            file = abspath(dir, mfst)
             isfile_casesensitive(file) || continue
             manifest_file = file
             break
@@ -336,7 +338,7 @@ function find_package_in_manifest(manifest_file::String, name::String, io::IO)
             """
         return nothing
     end
-    path != nothing
+    if path != nothing
         path = abspath(dirname(manifest_file), path)
         ispath(path) && return path, uuid, manifest_file
         @warn """
