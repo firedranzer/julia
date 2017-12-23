@@ -336,7 +336,7 @@ function find_package_in_manifest(manifest_file::String, name::String, io::IO)
     end
     if path != nothing
         path = abspath(dirname(manifest_file), path)
-        ispath(path) && return path, uuid, manifest_file
+        ispath(path) && return path, manifest_file, uuid
         @warn """
             $name/$uuid not installed at $(repr(path))
              - manifest = $(repr(manifest_file))
@@ -345,7 +345,7 @@ function find_package_in_manifest(manifest_file::String, name::String, io::IO)
     end
     if uuid != nothing && hash != nothing
         path = find_installed(uuid, hash)
-        ispath(path) && return path, uuid, manifest_file
+        ispath(path) && return path, manifest_file, uuid
         # TODO: prompt for installation
     end
     return nothing
@@ -377,7 +377,7 @@ function find_package_in_manifest(manifest_file::String, uuid::UUID, io::IO)
     end
     if path != nothing
         path = abspath(dirname(manifest_file), path)
-        ispath(path) && return path, uuid, manifest_file
+        ispath(path) && return path, manifest_file, uuid
         @warn """
             $name/$uuid not installed at $(repr(path))
              - manifest = $(repr(manifest_file))
@@ -386,7 +386,7 @@ function find_package_in_manifest(manifest_file::String, uuid::UUID, io::IO)
     end
     if hash != nothing
         path = find_installed(uuid, hash)
-        ispath(path) && return path, uuid, manifest_file
+        ispath(path) && return path, manifest_file, uuid
         # TODO: prompt for installation
     end
     return nothing
@@ -446,8 +446,9 @@ function _require_from_serialized(from::Module, mod::Symbol, path_to_try::String
                 depmods[i] = M
             end
         else
-            modpath = find_package(from, string(modname))
-            modpath === nothing && return ErrorException("Required dependency $modname not found in current path.")
+            info = find_package(from, string(modname))
+            info === nothing && return ErrorException("Required dependency $modname not found in current path.")
+            modpath = info isa String ? info : info[1]
             mod = _require_search_from_serialized(from, modname, String(modpath))
             if !isa(mod, Bool)
                 for M in mod::Vector{Any}
@@ -615,13 +616,27 @@ all platforms, including those with case-insensitive filesystems like macOS and
 Windows.
 """
 function require(from::Module, mod::Symbol)
+    info = nothing
     if !root_module_exists(mod)
-        _require(from, mod)
+        info = _require(from, mod)
         for callback in package_callbacks
             invokelatest(callback, mod)
         end
     end
-    return root_module(mod)
+    m = root_module(mod)
+    if info != nothing
+        if !isdefined(m, ENVINFO)
+            ccall(:jl_set_const, Cvoid, (Any, Any, Any), m, ENVINFO, info)
+        else
+            info == (info′ = getfield(m, ENVINFO)) ||
+                @warn """
+                require($from, $mod) envinfo mismatch:
+                 - old = $(info′)
+                 - new = $(info)
+                """
+        end
+    end
+    return m
 end
 
 const loaded_modules = ObjectIdDict()
@@ -691,18 +706,19 @@ function _require(from::Module, mod::Symbol)
         toplevel_load[] = false
         # perform the search operation to select the module file require intends to load
         name = string(mod)
-        path = find_package(from, name)
-        if path === nothing
+        info = find_package(from, name)
+        if info === nothing
+            # TODO: package autoloading hooks go here
             throw(ArgumentError("Module $name not found in current path.\nRun `Pkg.add(\"$name\")` to install the $name package."))
         end
-        path = String(path)
+        path = info isa String ? info : String(info[1])
 
         # attempt to load the module file via the precompile cache locations
         doneprecompile = false
         if JLOptions().use_compiled_modules != 0
             doneprecompile = _require_search_from_serialized(from, mod, path)
             if !isa(doneprecompile, Bool)
-                return
+                return info
             end
         end
 
@@ -728,7 +744,7 @@ function _require(from::Module, mod::Symbol)
                 @warn "The call to compilecache failed to create a usable precompiled cache file for module $name" exception=m
                 # fall-through, TODO: disable __precompile__(true) error so that the normal include will succeed
             else
-                return
+                return info
             end
         end
 
@@ -736,7 +752,7 @@ function _require(from::Module, mod::Symbol)
         # for unknown dependencies
         try
             Base.include_relative(__toplevel__, path)
-            return
+            return info
         catch ex
             if doneprecompile === true || JLOptions().use_compiled_modules == 0 || !precompilableerror(ex, true)
                 rethrow() # rethrow non-precompilable=true errors
@@ -757,7 +773,7 @@ function _require(from::Module, mod::Symbol)
         notify(loading, all=true)
         _track_dependencies[] = old_track_dependencies
     end
-    nothing
+    return info
 end
 
 # relative-path load
@@ -901,9 +917,9 @@ for important notes.
 """
 function compilecache(from::Module, name::String)
     # decide where to get the source file from
-    path = find_package(from, name)
-    path === nothing && throw(ArgumentError("$name not found in path"))
-    path = String(path)
+    info = find_package(from, name)
+    info === nothing && throw(ArgumentError("$name not found in path"))
+    path = info isa String ? info : String(info[1])
     # decide where to put the resulting cache file
     cachepath = LOAD_CACHE_PATH[1]
     if !isdir(cachepath)
@@ -1051,11 +1067,12 @@ function stale_cachefile(from::Module, modpath::String, cachefile::String)
                 continue
             end
             name = string(mod)
-            path = find_package(from, name)
-            if path === nothing
+            info = find_package(from, name)
+            if info === nothing
                 @debug "Rejecting cache file $cachefile because dependency $name not found."
                 return true # Won't be able to fullfill dependency
             end
+            path = info isa String ? info : String(info[1])
         end
 
         # check if this file is going to provide one of our concrete dependencies
