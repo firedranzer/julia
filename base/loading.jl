@@ -136,13 +136,12 @@ slug(sha1::SHA1, p::Int=4) = slug(sha1.bytes, p)
 
 version_slug(uuid::UUID, sha1::SHA1) = joinpath(slug(uuid), slug(sha1))
 
-function find_installed(uuid::UUID, sha1::SHA1)
+function find_installed(uuid::UUID, sha1::SHA1, name::AbstractString)
     slug = version_slug(uuid, sha1)
     for depot in DEPOT_PATH
-        path = abspath(depot, "packages", slug)
-        ispath(path) && return path
+        file = abspath(depot, "packages", slug, "src", "$name.jl")
+        isfile_casesensitive(file) && return file
     end
-    return abspath(DEPOT_PATH[1], "packages", slug)
 end
 
 ## finding packages ##
@@ -344,9 +343,9 @@ function find_package_in_manifest(manifest_file::String, name::String, io::IO)
         return nothing
     end
     if uuid != nothing && hash != nothing
-        path = find_installed(uuid, hash)
-        ispath(path) && return path, manifest_file, uuid
+        path = find_installed(uuid, hash, name)
         # TODO: prompt for installation
+        path != nothing && return path, manifest_file, uuid
     end
     return nothing
 end
@@ -385,9 +384,9 @@ function find_package_in_manifest(manifest_file::String, uuid::UUID, io::IO)
         return nothing
     end
     if hash != nothing
-        path = find_installed(uuid, hash)
-        ispath(path) && return path, manifest_file, uuid
+        path = find_installed(uuid, hash, name)
         # TODO: prompt for installation
+        path != nothing && return path, manifest_file, uuid
     end
     return nothing
 end
