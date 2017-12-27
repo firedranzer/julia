@@ -158,7 +158,7 @@ function find_env(envs::Vector)
     end
 end
 
-function find_env(env::String)
+function find_env(env::AbstractString)
     path = abspath(env)
     if isdir(path)
         # directory with a project file?
@@ -184,7 +184,7 @@ function find_env(env::NamedEnv)
     end
 end
 
-function find_env(env::CurrentEnv, dir::String = pwd())
+function find_env(env::CurrentEnv, dir::AbstractString = pwd())
     # look for project file in current dir and parents
     home = homedir()
     while true
@@ -199,22 +199,22 @@ function find_env(env::CurrentEnv, dir::String = pwd())
     end
 end
 
-package_entry_points(path::String, name::String) = [
+load_path() = filter(env -> env != nothing, map(find_env, LOAD_PATH))
+
+package_entry_points(path::AbstractString, name::AbstractString) = [
     joinpath(path, "$name.jl"),
     joinpath(path, "$name.jl", "src", "$name.jl"),
     joinpath(path,   name,     "src", "$name.jl"),
 ]
 
-function find_package(from::Module, name::String)
+function find_package(from::Module, name::AbstractString)
     Core.println("find_package($from, $name)")
     endswith(name, ".jl") && (name = chop(name, 0, 3))
     if isdefined(from, ENVINFO)
         manifest_file, from_uuid = getfield(from, ENVINFO)::Tuple{String,UUID}
         return find_package_in_manifest(manifest_file, from_uuid, name)
     end
-    for env in LOAD_PATH
-        path = find_env(env)
-        path == nothing && continue
+    for path in load_path()
         if isdir(path) # package directory
             for file in package_entry_points(path, name)
                 isfile_casesensitive(file) && return file
@@ -226,7 +226,7 @@ function find_package(from::Module, name::String)
     end
 end
 
-function find_package_in_project(project_file::String, name::String)
+function find_package_in_project(project_file::AbstractString, name::AbstractString)
     Core.println("find_package_in_project($project_file, $name)")
     isfile_casesensitive(project_file) || return nothing
     open(project_file) do io
@@ -263,7 +263,8 @@ function find_package_in_project(project_file::String, name::String)
     end
 end
 
-function find_package_in_manifest(manifest_file::String, from_uuid::UUID, name::String)
+function find_package_in_manifest(
+    manifest_file::AbstractString, from_uuid::UUID, name::AbstractString)
     Core.println("find_package_in_manifest($manifest_file, $from_uuid, $name)")
     isfile_casesensitive(manifest_file) || return nothing
     open(manifest_file) do io
@@ -303,7 +304,8 @@ function find_package_in_manifest(manifest_file::String, from_uuid::UUID, name::
     end
 end
 
-function find_package_in_manifest(manifest_file::String, name::String, io::IO)
+function find_package_in_manifest(
+    manifest_file::AbstractString, name::AbstractString, io::IO)
     Core.println("find_package_in_manifest($manifest_file, $name, $io)")
     found = false
     path = uuid = hash = nothing
@@ -350,7 +352,8 @@ function find_package_in_manifest(manifest_file::String, name::String, io::IO)
     return nothing
 end
 
-function find_package_in_manifest(manifest_file::String, uuid::UUID, io::IO)
+function find_package_in_manifest(
+    manifest_file::AbstractString, uuid::UUID, io::IO)
     Core.println("find_package_in_manifest($manifest_file, $uuid, $io)")
     # uuid of package to be loaded
     uuid′ = name = path = hash = nothing
@@ -391,14 +394,14 @@ function find_package_in_manifest(manifest_file::String, uuid::UUID, io::IO)
     return nothing
 end
 
-function find_package_in_manifest(manifest_file::String, uuid::UUID)
+function find_package_in_manifest(manifest_file::AbstractString, uuid::UUID)
     isfile_casesensitive(manifest_file) || return nothing
     open(manifest_file) do io
         find_package_in_manifest(manifest_file, uuid, io)
     end
 end
 
-function find_source_file(path::String)
+function find_source_file(path::AbstractString)
     (isabspath(path) || isfile(path)) && return path
     base_path = joinpath(Sys.BINDIR, DATAROOTDIR, "julia", "base", path)
     return isfile(base_path) ? base_path : nothing
